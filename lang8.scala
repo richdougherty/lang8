@@ -374,10 +374,10 @@ object Lang8 {
 				// XXX: Copy in-links???
 				val lam1 = e1f.to
 				val lam2 = e2f.to
-				val lam1Dom = outEdgeByLabel(lam1, Domain).get
-				val lam1Cod = outEdgeByLabel(lam1, Codomain).get
-				val lam2Dom = outEdgeByLabel(lam2, Domain).get
-				val lam2Cod = outEdgeByLabel(lam2, Codomain).get
+				val lam1Dom = outEdgeByLabel(lam1, Domain).get.to
+				val lam1Cod = outEdgeByLabel(lam1, Codomain).get.to
+				val lam2Dom = outEdgeByLabel(lam2, Domain).get.to
+				val lam2Cod = outEdgeByLabel(lam2, Codomain).get.to
 				val inter = e1f.from
 				val interBinder = inEdgeByLabel(inter, Binding).get.from
 				
@@ -385,41 +385,56 @@ object Lang8 {
 				val g1 = g
 					.edge(e2f.id).delete
 					.unfocus
-					.edge(lam1Cod.id).delete
-					.unfocus
-					.edge(lam1Dom.id).delete
-					.unfocus
 				val lam1DomInter = g1.addNode(Intersection)
 				val g2 = lam1DomInter.unfocus
 				val lam1CodInter = lam1DomInter
 					.unfocus
 					.addNode(Intersection)
 				val g3 = lam1CodInter.unfocus
-				val g4 = g3
+					
+				// Move edges from old domain/codomain nodes
+				// to new intersection nodes
+				
+				def relinkEdge(ef: EdgeFocus[NodeLabel,EdgeLabel], nid: NodeId): EdgeFocus[NodeLabel,EdgeLabel] = {
+					ef.delete.link(ef.value, nid)
+				}
+				def relinkMatchingInEdges(existing: NodeFocus[NodeLabel,EdgeLabel], newNid: NodeId, filter: EdgeFocus[NodeLabel,EdgeLabel] => Boolean): Graph[NodeLabel,EdgeLabel] = {
+					(for (ef <- existing.to) yield ef.id).foldLeft(existing.unfocus) {
+						case (g, eid) => {
+							val ef1 = g.edge(eid)
+							if (filter(ef1)) relinkEdge(ef1, newNid).unfocus
+							else g
+						}
+					}
+				}
+				
+				val nonBinding = (_ : EdgeFocus[NodeLabel,EdgeLabel]).value != Binding
+				
+				val g5 = relinkMatchingInEdges(g3.node(lam1Dom.id), lam1DomInter.id, nonBinding)
+				val g6 = relinkMatchingInEdges(g5.node(lam1Cod.id), lam1CodInter.id, nonBinding)
+				val g7 = relinkMatchingInEdges(g6.node(lam2Dom.id), lam1DomInter.id, nonBinding)
+				val g8 = relinkMatchingInEdges(g7.node(lam2Cod.id), lam1CodInter.id, nonBinding)
+
+				val g10 = g8
 					// Binding edges
 					.node(interBinder.id)
 					.link(Binding, lam1DomInter.id)
 					.from
 					.link(Binding, lam1CodInter.id)
 					.unfocus
-					// New lambda edges
-					.node(lam1.id)
-					.link(Domain, lam1DomInter.id)
-					.from
-					.link(Codomain, lam1CodInter.id)
-					.unfocus
 					// Member edges
 					.node(lam1DomInter.id)
-					.link(Member, lam1Dom.to.id)
+					.link(Member, lam1Dom.id)
 					.from
-					.link(Member, lam2Dom.to.id)
+					.link(Member, lam2Dom.id)
 					.unfocus
 					.node(lam1CodInter.id)
-					.link(Member, lam1Cod.to.id)
+					.link(Member, lam1Cod.id)
 					.from
-					.link(Member, lam2Cod.to.id)
+					.link(Member, lam2Cod.id)
 					.unfocus
-				g4
+					
+				g10
 			}
 			case _ => error("!!!")
 			
