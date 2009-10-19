@@ -305,6 +305,39 @@ object Lang8 {
 		singleOption(matches)
 	}
 	
+	def relinkEdge(ef: EdgeFocus[NodeLabel,EdgeLabel], nid: NodeId): EdgeFocus[NodeLabel,EdgeLabel] = {
+		ef.delete.link(ef.value, nid)
+	}
+	def relinkMatchingInEdges(existing: NodeFocus[NodeLabel,EdgeLabel], newNid: NodeId, filter: EdgeFocus[NodeLabel,EdgeLabel] => Boolean): Graph[NodeLabel,EdgeLabel] = {
+		(for (ef <- existing.to) yield ef.id).foldLeft(existing.unfocus) {
+			case (g, eid) => {
+				val ef1 = g.edge(eid)
+				if (filter(ef1)) relinkEdge(ef1, newNid).unfocus
+				else g
+			}
+		}
+	}
+	
+	def replaceWithIntersection(g: Graph[NodeLabel,EdgeLabel], nids: List[NodeId]): NodeFocus[NodeLabel,EdgeLabel] = {
+		assert(!nids.isEmpty)
+		val inter = g.addNode(Intersection)
+		val g1 = inter.unfocus
+		
+		// Calculate binding for intersection by looking at bindings for member nodes.
+		// XXX: Not sure of exact algorithm yet.
+		val g2 = inEdgeByLabel(g1.node(nids.head), Binding).get.from.link(Binding, inter.id).unfocus
+		
+		// Move existing member in-edges to intersection
+		val nonBinding = (_ : EdgeFocus[NodeLabel,EdgeLabel]).value != Binding
+		val g3 = nids.foldLeft(g2) { case (g, nid) => relinkMatchingInEdges(g.node(nid), inter.id, nonBinding) }
+		// XXX: Handle outgoing instantiation edges!
+		
+		// Add member edges
+		val g4 = nids.foldLeft(g3) { case (g, nid) => g.node(inter.id).link(Member, nid).unfocus }
+		
+		g4.node(inter.id)
+	} 
+	
 	// input is focus on instantiation edge, output is focus on created intersection node
 	def instantiate(ef: EdgeFocus[NodeLabel,EdgeLabel]): NodeFocus[NodeLabel,EdgeLabel] = {
 		// 1. Copy all nodes bound by target of instantiation (including target).
@@ -361,7 +394,7 @@ object Lang8 {
 			.from
 	}
 	
-	def intersect(g: Graph[NodeLabel,EdgeLabel], e1: EdgeId, e2: EdgeId): Graph[NodeLabel,EdgeLabel] = {
+	def solveIntersection(g: Graph[NodeLabel,EdgeLabel], e1: EdgeId, e2: EdgeId): Graph[NodeLabel,EdgeLabel] = {
 		val e1f = g.edge(e1)
 		val e2f = g.edge(e2)
 		assert(e1f.from.id == e2f.from.id)
@@ -372,12 +405,15 @@ object Lang8 {
 			case (Lambda, Lambda) => {
 				// XXX: Think about bindings!
 				// XXX: Copy in-links???
+				// XXX: Merge nodes?
 				val lam1 = e1f.to
 				val lam2 = e2f.to
+				
 				val lam1Dom = outEdgeByLabel(lam1, Domain).get.to
 				val lam1Cod = outEdgeByLabel(lam1, Codomain).get.to
 				val lam2Dom = outEdgeByLabel(lam2, Domain).get.to
 				val lam2Cod = outEdgeByLabel(lam2, Codomain).get.to
+				
 				val inter = e1f.from
 				val interBinder = inEdgeByLabel(inter, Binding).get.from
 				
@@ -385,56 +421,13 @@ object Lang8 {
 				val g1 = g
 					.edge(e2f.id).delete
 					.unfocus
-				val lam1DomInter = g1.addNode(Intersection)
-				val g2 = lam1DomInter.unfocus
-				val lam1CodInter = lam1DomInter
-					.unfocus
-					.addNode(Intersection)
-				val g3 = lam1CodInter.unfocus
-					
-				// Move edges from old domain/codomain nodes
-				// to new intersection nodes
-				
-				def relinkEdge(ef: EdgeFocus[NodeLabel,EdgeLabel], nid: NodeId): EdgeFocus[NodeLabel,EdgeLabel] = {
-					ef.delete.link(ef.value, nid)
-				}
-				def relinkMatchingInEdges(existing: NodeFocus[NodeLabel,EdgeLabel], newNid: NodeId, filter: EdgeFocus[NodeLabel,EdgeLabel] => Boolean): Graph[NodeLabel,EdgeLabel] = {
-					(for (ef <- existing.to) yield ef.id).foldLeft(existing.unfocus) {
-						case (g, eid) => {
-							val ef1 = g.edge(eid)
-							if (filter(ef1)) relinkEdge(ef1, newNid).unfocus
-							else g
-						}
-					}
-				}
-				
-				val nonBinding = (_ : EdgeFocus[NodeLabel,EdgeLabel]).value != Binding
-				
-				val g5 = relinkMatchingInEdges(g3.node(lam1Dom.id), lam1DomInter.id, nonBinding)
-				val g6 = relinkMatchingInEdges(g5.node(lam1Cod.id), lam1CodInter.id, nonBinding)
-				val g7 = relinkMatchingInEdges(g6.node(lam2Dom.id), lam1DomInter.id, nonBinding)
-				val g8 = relinkMatchingInEdges(g7.node(lam2Cod.id), lam1CodInter.id, nonBinding)
 
-				val g10 = g8
-					// Binding edges
-					.node(interBinder.id)
-					.link(Binding, lam1DomInter.id)
-					.from
-					.link(Binding, lam1CodInter.id)
-					.unfocus
-					// Member edges
-					.node(lam1DomInter.id)
-					.link(Member, lam1Dom.id)
-					.from
-					.link(Member, lam2Dom.id)
-					.unfocus
-					.node(lam1CodInter.id)
-					.link(Member, lam1Cod.id)
-					.from
-					.link(Member, lam2Cod.id)
-					.unfocus
-					
-				g10
+				
+				val lam1DomInter = replaceWithIntersection(g1, List(lam1Dom.id, lam2Dom.id))
+				val g2 = lam1DomInter.unfocus
+				val lam1CodInter = replaceWithIntersection(g2, List(lam1Cod.id, lam2Cod.id))
+				val g3 = lam1CodInter.unfocus
+				g3
 			}
 			case _ => error("!!!")
 			
@@ -457,14 +450,14 @@ object Lang8 {
 	// - combine parent/child intersections/unions
 	// - unboxing
 	
-	def intersect1(g: Graph[NodeLabel,EdgeLabel]): Graph[NodeLabel,EdgeLabel] = {
+	def solveIntersection1(g: Graph[NodeLabel,EdgeLabel]): Graph[NodeLabel,EdgeLabel] = {
 		val intersections = for (n <- g.nodes; if (n.value == Intersection)) yield n
 		if (intersections.isEmpty) g
 		else {
 			val intersection = intersections.head
 			val members = (for (e <- intersection.from; if (e.value == Member)) yield e).toList
 			// XXX: Handle 0/1 members
-			intersect(g, members(0).id, members(1).id)
+			solveIntersection(g, members(0).id, members(1).id)
 		}
 	}
 	
@@ -487,6 +480,6 @@ object Lang8 {
 		val swapFocus = createSwap(Graph.empty)
 		val swapSwapFocus = createComposition(swapFocus.unfocus, swapFocus.id, swapFocus.id)
 		val start = swapSwapFocus.unfocus
-		printDot(intersect1(instantiate1(instantiate1(start))))
+		printDot(solveIntersection1(instantiate1(instantiate1(start))))
 	}
 }
