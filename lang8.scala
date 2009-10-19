@@ -196,6 +196,17 @@ object Lang8 {
 	case object Equal extends EdgeLabel
 	case object NotEqual extends EdgeLabel
 	
+	// Id
+	def createId(g: Graph[NodeLabel,EdgeLabel]): NodeFocus[NodeLabel,EdgeLabel] = {
+		newScope[NodeLabel,EdgeLabel](g)
+		.addNode("top", Lambda)
+		.addNode("a", Variable)
+		.addEdge(Domain, "top", "a")
+		.addEdge(Codomain, "top", "a")
+		.addEdge(Binding, "top", "a")
+		.node("top")
+	}
+	
 	// Swap
 	def createSwap(g: Graph[NodeLabel,EdgeLabel]): NodeFocus[NodeLabel,EdgeLabel] = {
 		newScope[NodeLabel,EdgeLabel](g)
@@ -282,7 +293,12 @@ object Lang8 {
 		.node("top")
 	}
 	
-	def printDot[N,E](g: Graph[N,E]): Unit = {
+	import java.io._
+	
+	def printDot[N,E](os: OutputStream, g: Graph[N,E]): Unit = {
+		val oswriter = new OutputStreamWriter(os)
+		val pwriter = new PrintWriter(oswriter)
+		import pwriter.{println, print}
 		println("digraph G {")
 		for (n <- g.nodes) {
 			println("n" + n.id + " [label=\"" + n.value + "\"];")
@@ -297,6 +313,7 @@ object Lang8 {
 			}
 		}
 		println("}")
+		pwriter.flush()
 	}
 	
 	def lookup[A,B](pairs: List[(A,B)], key: A): Option[B] = {
@@ -482,7 +499,6 @@ object Lang8 {
 				g3
 			}
 			case (a, b) => {
-				printDot(g)
 				error("Cannot solve intersection between " + a + " and " + b + ".")
 			}
 			
@@ -542,18 +558,57 @@ object Lang8 {
 			*/
 	}
 	
-	def fixpoint[A](f: A => A, a: A): A = {
-		val result = f(a)
-		if (result == a) a
-		else (fixpoint(f, result))
-	}
-	
 	def main(args: Array[String]): Unit = {
+		//val idFocus = createId(Graph.empty)
 		val swapFocus = createSwap(Graph.empty)
 		val swapSwapFocus = createComposition(swapFocus.unfocus, swapFocus.id, swapFocus.id)
+		//val idIdFocus = createComposition(swapSwapFocus.unfocus, idFocus.id, idFocus.id)
 		//val integerLib = createIntegerLib(swapSwapFocus.unfocus)
 		val start = swapSwapFocus.unfocus
-		printDot(fixpoint(solveIntersection1 _, fixpoint(instantiate1 _, start)))
+		
+		val stepFunctions = List(
+			solveIntersection1 _,
+			instantiate1 _
+		)
+	
+		def fixpoint[A](f: A => A, a: A): A = {
+			val result = f(a)
+			if (result == a) a
+			else (fixpoint(f, result))
+		}
+
+		def step1(g: Graph[NodeLabel,EdgeLabel]) = {
+			stepFunctions.foldLeft(g) { case (g1, f) => if (g == g1) f(g1) else g1 }
+		}
+		
+		def fixpointSearch[A](f: A => A, a: A): List[A] = {
+			def search0(a1: A, acc: List[A]): List[A] = {
+				try {
+					val result = f(a1)
+					if (result == a1) acc.reverse
+					else (search0(result, result::acc))
+				} catch {
+					case e => {
+						e.printStackTrace
+						acc.reverse
+					}
+				}
+			}
+			search0(a, a::Nil)
+		}
+		
+		val gs = fixpointSearch(step1 _, start)
+		for ((g, i) <- gs.zipWithIndex) {
+			import java.io._
+			val f = new File("step-"+i+".dot")
+			val os = new FileOutputStream(f)
+			try {
+				printDot(os, g)
+			} finally {
+				os.close
+			}
+		}
+		//printDot(fixpoint(solveIntersection1 _, fixpoint(instantiate1 _, start)))
 		//printDot(solveIntersection1(solveIntersection1(solveIntersection1(solveIntersection1(solveIntersection1(instantiate1(instantiate1(start))))))))
 	}
 }
