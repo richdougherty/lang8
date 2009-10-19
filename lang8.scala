@@ -359,7 +359,7 @@ object Lang8 {
 		// Move existing member in-edges to intersection
 		val nonBinding = (_ : EdgeFocus[NodeLabel,EdgeLabel]).value != Binding
 		val g3 = nids.foldLeft(g2) { case (g, nid) => relinkMatchingInEdges(g.node(nid), inter.id, nonBinding) }
-		// XXX: Handle outgoing instantiation edges!
+		// XXX: Handle outgoing edges! e.g. instantiation
 		
 		// Add member edges
 		val g4 = nids.foldLeft(g3) { case (g, nid) => g.node(inter.id).link(Member, nid).unfocus }
@@ -447,10 +447,7 @@ object Lang8 {
 				val interBinder = inEdgeByLabel(inter, Binding).get.from
 				
 				// Delete
-				val g1 = g
-					.edge(e2f.id).delete
-					.unfocus
-
+				val g1 = g.node(lam2.id).delete // XXX: Need to check all out-edges were copied when intersection was made
 				
 				val lam1DomInter = replaceWithIntersection(g1, List(lam1Dom.id, lam2Dom.id))
 				val g2 = lam1DomInter.unfocus
