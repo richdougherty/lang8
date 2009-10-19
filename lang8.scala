@@ -207,12 +207,12 @@ object Lang8 {
 		.addNode("a", Variable)
 		.addNode("b", Variable)
 		.addNode("rest", Variable)
-		.addEdge(Codomain, "top", "inpair1")
+		.addEdge(Domain, "top", "inpair1")
 		.addEdge(Left, "inpair1", "b")
 		.addEdge(Right, "inpair1", "inpair2")
 		.addEdge(Left, "inpair2", "a")
 		.addEdge(Right, "inpair2", "rest")
-		.addEdge(Domain, "top", "outpair1")
+		.addEdge(Codomain, "top", "outpair1")
 		.addEdge(Left, "outpair1", "a")
 		.addEdge(Right, "outpair1", "outpair2")
 		.addEdge(Left, "outpair2", "b")
@@ -225,6 +225,35 @@ object Lang8 {
 		.addEdge(Binding, "top", "b")
 		.addEdge(Binding, "top", "rest")
 		.node("top")
+	}
+	
+	// Integer
+	def createIntegerLib(g: Graph[NodeLabel,EdgeLabel]): Graph[NodeLabel,EdgeLabel] = {
+		newScope[NodeLabel,EdgeLabel](g)
+		.addNode("zero", Symbol)
+		.addNode("succ", Symbol)
+		
+		.addNode("inc", Lambda)
+		.addNode("inpair1", Pair)
+		.addNode("outpair1", Pair)
+		.addNode("a", Variable)
+		.addNode("aSucc", Pair)
+		.addNode("rest", Variable)
+		.addEdge(Domain, "inc", "inpair1")
+		.addEdge(Left, "inpair1", "a")
+		.addEdge(Right, "inpair1", "rest")
+		.addEdge(Codomain, "inc", "outpair1")
+		.addEdge(Left, "outpair1", "aSucc")
+		.addEdge(Right, "outpair1", "rest")
+		.addEdge(Left, "aSucc", "succ")
+		.addEdge(Right, "aSucc", "a")
+		.addEdge(Binding, "inc", "inpair1")
+		.addEdge(Binding, "inc", "outpair1")
+		.addEdge(Binding, "inc", "a")
+		.addEdge(Binding, "inc", "aSucc")
+		.addEdge(Binding, "inc", "rest")
+		
+		.graph
 	}
 	
 	def createComposition(g: Graph[NodeLabel,EdgeLabel], lam1: NodeId, lam2: NodeId): NodeFocus[NodeLabel,EdgeLabel] = {
@@ -479,6 +508,7 @@ object Lang8 {
 	def main(args: Array[String]): Unit = {
 		val swapFocus = createSwap(Graph.empty)
 		val swapSwapFocus = createComposition(swapFocus.unfocus, swapFocus.id, swapFocus.id)
+		//val integerLib = createIntegerLib(swapSwapFocus.unfocus)
 		val start = swapSwapFocus.unfocus
 		printDot(solveIntersection1(instantiate1(instantiate1(start))))
 	}
