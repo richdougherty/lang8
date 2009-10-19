@@ -337,6 +337,9 @@ object Lang8 {
 	def relinkEdge(ef: EdgeFocus[NodeLabel,EdgeLabel], nid: NodeId): EdgeFocus[NodeLabel,EdgeLabel] = {
 		ef.delete.link(ef.value, nid)
 	}
+
+	val nonBinding = (_ : EdgeFocus[NodeLabel,EdgeLabel]).value != Binding
+	
 	def relinkMatchingInEdges(existing: NodeFocus[NodeLabel,EdgeLabel], newNid: NodeId, filter: EdgeFocus[NodeLabel,EdgeLabel] => Boolean): Graph[NodeLabel,EdgeLabel] = {
 		(for (ef <- existing.to) yield ef.id).foldLeft(existing.unfocus) {
 			case (g, eid) => {
@@ -357,7 +360,6 @@ object Lang8 {
 		val g2 = inEdgeByLabel(g1.node(nids.head), Binding).get.from.link(Binding, inter.id).unfocus
 		
 		// Move existing member in-edges to intersection
-		val nonBinding = (_ : EdgeFocus[NodeLabel,EdgeLabel]).value != Binding
 		val g3 = nids.foldLeft(g2) { case (g, nid) => relinkMatchingInEdges(g.node(nid), inter.id, nonBinding) }
 		// XXX: Handle outgoing edges! e.g. instantiation
 		
@@ -482,10 +484,21 @@ object Lang8 {
 		else {
 			val intersection = intersections.head
 			val members = (for (e <- intersection.from; if (e.value == Member)) yield e).toList
-			// XXX: Handle 0/1 members
-			solveIntersection(g, members(0).id, members(1).id)
+			// XXX: Handle 0 members
+			if (members.length == 1) removeTrivialIntersection(intersection)
+			else solveIntersection(g, members(0).id, members(1).id)
 		}
 	}
+	
+	def removeTrivialIntersection(nf: NodeFocus[NodeLabel,EdgeLabel]): Graph[NodeLabel,EdgeLabel] = {
+		val outgoing = (for (ef <- nf.from) yield ef).toList
+		assert(outgoing.size == 1)
+		val memberEdge = outgoing(0)
+		assert(memberEdge.value == Member)
+		relinkMatchingInEdges(nf, memberEdge.to.id, nonBinding)
+		// XXX: Should relink instantiation edge too!
+	}
+
 	
 	def instantiate1(g: Graph[NodeLabel,EdgeLabel]): Graph[NodeLabel,EdgeLabel] = {
 		val instantiations = (for (e <- g.edges; if (e.value == Instantiate)) yield e).toList
@@ -507,6 +520,6 @@ object Lang8 {
 		val swapSwapFocus = createComposition(swapFocus.unfocus, swapFocus.id, swapFocus.id)
 		//val integerLib = createIntegerLib(swapSwapFocus.unfocus)
 		val start = swapSwapFocus.unfocus
-		printDot(solveIntersection1(instantiate1(instantiate1(start))))
+		printDot(solveIntersection1(solveIntersection1(instantiate1(instantiate1(start)))))
 	}
 }
