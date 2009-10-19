@@ -426,14 +426,40 @@ object Lang8 {
 	}
 	
 	def solveIntersection(g: Graph[NodeLabel,EdgeLabel], e1: EdgeId, e2: EdgeId): Graph[NodeLabel,EdgeLabel] = {
+	
 		val e1f = g.edge(e1)
 		val e2f = g.edge(e2)
 		assert(e1f.from.id == e2f.from.id)
 		assert(e1f.from.value == Intersection)
 		assert(e1f.value == Member)
 		assert(e2f.value == Member)
+
+
 		(e1f.to.value, e2f.to.value) match {
+			case (Variable, _) => {
+				e1f.to.delete
+			}
+			case (_, Variable) => {
+				solveIntersection(g, e2, e1)
+			}
+			case (Intersection, _) => {
+				val parent = e1f.from
+				val child = e1f.to
+				// Delete member link to child intersection
+				val g1 = e1f.delete.unfocus
+				// Copy all edges from child to parent intersection
+				val g2 = relinkMatchingInEdges(g1.node(child.id), parent.id, nonBinding)
+				// Delete child intersection
+				val g3 = g2.node(child.id).delete
+				g3
+			}
+			case (_, Intersection) => {
+				solveIntersection(g, e2, e1)
+			}
 			case (Lambda, Lambda) => {
+				val inter = e1f.from
+				val interBinder = inEdgeByLabel(inter, Binding).get.from
+
 				// XXX: Think about bindings!
 				// XXX: Copy in-links???
 				// XXX: Merge nodes?
@@ -445,8 +471,6 @@ object Lang8 {
 				val lam2Dom = outEdgeByLabel(lam2, Domain).get.to
 				val lam2Cod = outEdgeByLabel(lam2, Codomain).get.to
 				
-				val inter = e1f.from
-				val interBinder = inEdgeByLabel(inter, Binding).get.from
 				
 				// Delete
 				val g1 = g.node(lam2.id).delete // XXX: Need to check all out-edges were copied when intersection was made
@@ -457,7 +481,10 @@ object Lang8 {
 				val g3 = lam1CodInter.unfocus
 				g3
 			}
-			case _ => error("!!!")
+			case (a, b) => {
+				printDot(g)
+				error("Cannot solve intersection between " + a + " and " + b + ".")
+			}
 			
 			/*case (_, _) if (e1f.to.id == e2f.to.id) => 
 			case (Variable, Variable) => // merge into single variable
@@ -495,7 +522,7 @@ object Lang8 {
 		assert(outgoing.size == 1)
 		val memberEdge = outgoing(0)
 		assert(memberEdge.value == Member)
-		relinkMatchingInEdges(nf, memberEdge.to.id, nonBinding)
+		relinkMatchingInEdges(nf, memberEdge.to.id, nonBinding).node(nf.id).delete
 		// XXX: Should relink instantiation edge too!
 	}
 
@@ -515,11 +542,18 @@ object Lang8 {
 			*/
 	}
 	
+	def fixpoint[A](f: A => A, a: A): A = {
+		val result = f(a)
+		if (result == a) a
+		else (fixpoint(f, result))
+	}
+	
 	def main(args: Array[String]): Unit = {
 		val swapFocus = createSwap(Graph.empty)
 		val swapSwapFocus = createComposition(swapFocus.unfocus, swapFocus.id, swapFocus.id)
 		//val integerLib = createIntegerLib(swapSwapFocus.unfocus)
 		val start = swapSwapFocus.unfocus
-		printDot(solveIntersection1(solveIntersection1(instantiate1(instantiate1(start)))))
+		printDot(fixpoint(solveIntersection1 _, fixpoint(instantiate1 _, start)))
+		//printDot(solveIntersection1(solveIntersection1(solveIntersection1(solveIntersection1(solveIntersection1(instantiate1(instantiate1(start))))))))
 	}
 }
