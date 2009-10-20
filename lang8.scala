@@ -301,7 +301,7 @@ object Lang8 {
 		import pwriter.{println, print}
 		println("digraph G {")
 		for (n <- g.nodes) {
-			println("n" + n.id + " [label=\"" + n.value + "\"];")
+			println("n" + n.id + " [label=\"" + n.value + n.id + "\"];")
 			for (e <- n.from) {
 				println("n" + n.id + " -> " + "n" + e.to.id + " [")
 				println(
@@ -451,6 +451,8 @@ object Lang8 {
 		assert(e1f.value == Member)
 		assert(e2f.value == Member)
 
+		// Handle duplicate membership - can happen when copying edges
+		if (e1f.to.id == e2f.to.id) return e2f.delete.unfocus
 
 		(e1f.to.value, e2f.to.value) match {
 			case (Variable, _) => {
@@ -538,6 +540,48 @@ object Lang8 {
 		}
 	}
 	
+	def merge1(g: Graph[NodeLabel,EdgeLabel]): Graph[NodeLabel,EdgeLabel] = {
+		for (n1 <- g.nodes; n2 <- g.nodes; if (n1.id != n2.id)) {
+			//println(n1.id + " eq " + n2.id)
+			if (equalValue(g, n1.id, n2.id)) {
+				// XXX: Choose binding edge?
+				// XXX: Copy instantiation edges?
+				//println("found match")
+				return relinkMatchingInEdges(g.node(n2.id), n1.id, nonBinding).node(n2.id).delete
+			}
+		}	
+		//println("no matches")
+		g
+	}
+
+	def equalValue(g: Graph[NodeLabel,EdgeLabel], nid1: NodeId, nid2: NodeId): Boolean = {
+		// XXX: Handle cycles.
+		if (nid1 == nid2) true
+		else {
+			val nf1 = g.node(nid1)
+			val nf2 = g.node(nid2)
+			(nf1.value, nf2.value) match {
+				case (Pair, Pair) => {
+					val pair1Left = outEdgeByLabel(nf1, Left).get.to
+					val pair1Right = outEdgeByLabel(nf1, Right).get.to
+					val pair2Left = outEdgeByLabel(nf2, Left).get.to
+					val pair2Right = outEdgeByLabel(nf2, Right).get.to
+					equalValue(g, pair1Left.id, pair2Left.id) && equalValue(g, pair1Right.id, pair2Right.id)
+				}
+				case (Lambda, Lambda) => {
+					val lam1Dom = outEdgeByLabel(nf1, Domain).get.to
+					val lam1Cod = outEdgeByLabel(nf1, Codomain).get.to
+					val lam2Dom = outEdgeByLabel(nf2, Domain).get.to
+					val lam2Cod = outEdgeByLabel(nf2, Codomain).get.to
+					equalValue(g, lam1Dom.id, lam2Dom.id) && equalValue(g, lam1Cod.id, lam2Cod.id)
+				}
+				case (_, _) => {
+					false
+				}
+			}
+		}
+	}
+	
 	// steps:
 	// - garbage collection
 	// - instantiation
@@ -592,6 +636,7 @@ object Lang8 {
 		val start = swapSwapFocus.unfocus
 		
 		val stepFunctions = List(
+			merge1 _,
 			solveIntersection1 _,
 			instantiate1 _
 		)
