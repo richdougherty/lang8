@@ -498,6 +498,31 @@ object Lang8 {
 				val g3 = lam1CodInter.unfocus
 				g3
 			}
+			case (Pair, Pair) => {
+				val inter = e1f.from
+				val interBinder = inEdgeByLabel(inter, Binding).get.from
+
+				// XXX: Think about bindings!
+				// XXX: Copy in-links???
+				// XXX: Merge nodes?
+				val pair1 = e1f.to
+				val pair2 = e2f.to
+				
+				val pair1Left = outEdgeByLabel(pair1, Left).get.to
+				val pair1Right = outEdgeByLabel(pair1, Right).get.to
+				val pair2Left = outEdgeByLabel(pair2, Left).get.to
+				val pair2Right = outEdgeByLabel(pair2, Right).get.to
+				
+				
+				// Delete
+				val g1 = g.node(pair2.id).delete // XXX: Need to check all out-edges were copied when intersection was made
+				
+				val pair1LeftInter = replaceWithIntersection(g1, List(pair1Left.id, pair2Left.id))
+				val g2 = pair1LeftInter.unfocus
+				val pair1RightInter = replaceWithIntersection(g2, List(pair1Right.id, pair2Right.id))
+				val g3 = pair1RightInter.unfocus
+				g3
+			}
 			case (a, b) => {
 				error("Cannot solve intersection between " + a + " and " + b + ".")
 			}
