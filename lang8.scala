@@ -244,6 +244,27 @@ object Lang8 {
 		.node("top")
 	}
 	
+	// Apply
+	def createApply(g: Graph[NodeLabel,EdgeLabel]): NodeFocus[NodeLabel,EdgeLabel] = {
+		newScope[NodeLabel,EdgeLabel](g)
+		.addNode("top", Lambda)
+		.addNode("inpair", Pair)
+		.addNode("lam", Lambda)
+		.addNode("rest", Variable)
+		.addNode("out", Variable)
+		.addEdge(Domain, "top", "inpair")
+		.addEdge(Codomain, "top", "out")
+		.addEdge(Domain, "lam", "rest")
+		.addEdge(Codomain, "lam", "out")
+		.addEdge(Left, "inpair", "lam")
+		.addEdge(Right, "inpair", "rest")
+		.addEdge(Binding, "top", "inpair")
+		.addEdge(Binding, "top", "lam")
+		.addEdge(Binding, "top", "rest")
+		.addEdge(Binding, "top", "out")
+		.node("top")
+	}
+	
 	// Integer
 	def createIntegerLib(g: Graph[NodeLabel,EdgeLabel]): Graph[NodeLabel,EdgeLabel] = {
 		newScope[NodeLabel,EdgeLabel](g)
@@ -716,7 +737,8 @@ object Lang8 {
 		val swapSwapFocus = createComposition(swapFocus.unfocus, swapFocus.id, swapFocus.id)
 		val idIdFocus = createComposition(swapSwapFocus.unfocus, idFocus.id, idFocus.id)
 		//val integerLib = createIntegerLib(swapSwapFocus.unfocus)
-		val start = idIdFocus.unfocus
+		val applyFocus = createApply(idIdFocus.unfocus)
+		val start = applyFocus.unfocus
 			.addNode(Root)
 			.link(Pin, swapFocus.id)
 			.from
@@ -725,6 +747,8 @@ object Lang8 {
 			.link(Pin, swapSwapFocus.id)
 			.from
 			.link(Pin, idIdFocus.id)
+			.from
+			.link(Pin, applyFocus.id)
 			.unfocus
 		
 		val stepFunctions: List[Graph[NodeLabel,EdgeLabel]=>StepResult] = List(
