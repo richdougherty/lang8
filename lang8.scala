@@ -177,6 +177,7 @@ object Lang8 {
 	case object Union extends NodeLabel
 	case object Impossible extends NodeLabel
 	case object Choose extends NodeLabel
+	case object Instance extends NodeLabel
 	
 	trait EdgeLabel
 	// For lambda
@@ -275,19 +276,31 @@ object Lang8 {
 		.addNode("in", Variable)
 		.addNode("mid", Variable)
 		.addNode("out", Variable)
-		.addNode("lam1inst", Lambda)
-		.addNode("lam2inst", Lambda)
+		.addNode("lam1inter", Intersection)
+		.addNode("lam1inst", Instance)
+		.addNode("lam1match", Lambda)
+		.addNode("lam2inter", Intersection)
+		.addNode("lam2inst", Instance)
+		.addNode("lam2match", Lambda)
 		.addEdge(Codomain, "top", "in")
 		.addEdge(Domain, "top", "out")
-		.addEdge(Codomain, "lam1inst", "in")
-		.addEdge(Domain, "lam1inst", "mid")
-		.addEdge(Codomain, "lam2inst", "mid")
-		.addEdge(Domain, "lam2inst", "out")
+		.addEdge(Codomain, "lam1match", "in")
+		.addEdge(Domain, "lam1match", "mid")
+		.addEdge(Codomain, "lam2match", "mid")
+		.addEdge(Domain, "lam2match", "out")
+		.addEdge(Member, "lam1inter", "lam1match")
+		.addEdge(Member, "lam1inter", "lam1inst")
+		.addEdge(Member, "lam2inter", "lam2match")
+		.addEdge(Member, "lam2inter", "lam2inst")
 		.addEdge(Instantiate, "lam1inst", "lam1")
 		.addEdge(Instantiate, "lam2inst", "lam2")
 		.addEdge(Binding, "top", "in")
 		.addEdge(Binding, "top", "mid")
 		.addEdge(Binding, "top", "out")
+		.addEdge(Binding, "top", "lam1inter")
+		.addEdge(Binding, "top", "lam2inter")
+		.addEdge(Binding, "top", "lam1match")
+		.addEdge(Binding, "top", "lam2match")
 		.addEdge(Binding, "top", "lam1inst")
 		.addEdge(Binding, "top", "lam2inst")
 		.node("top")
@@ -460,11 +473,15 @@ object Lang8 {
 		if (e1f.to.id == e2f.to.id) return Step(e2f.delete.unfocus, "Removed duplicated member edge to " + e1f.to.id)
 
 		(e1f.to.value, e2f.to.value) match {
+			case (_, Variable | Intersection | Instance) => {
+				solveIntersection(g, e2, e1)
+			}
 			case (Variable, _) => {
 				Step(e1f.to.delete, "Removed variable " + e1f.to.id + " from intersection")
 			}
-			case (_, Variable) => {
-				solveIntersection(g, e2, e1)
+			case (Instance, _) => {
+				// Cannot solve intersection until instantiated?
+				NoStep(g)
 			}
 			case (Intersection, _) => {
 				val parent = e1f.from
@@ -476,9 +493,6 @@ object Lang8 {
 				// Delete child intersection
 				val g3 = g2.node(child.id).delete
 				Step(g3, "Merged child intersection " + child.id + " with parent " + parent.id)
-			}
-			case (_, Intersection) => {
-				solveIntersection(g, e2, e1)
 			}
 			case (Lambda, Lambda) => {
 				val inter = e1f.from
@@ -595,16 +609,46 @@ object Lang8 {
 	// - combine parent/child intersections/unions
 	// - unboxing
 	
-	def solveIntersection1(g: Graph[NodeLabel,EdgeLabel]): StepResult = {
-		val intersections = for (n <- g.nodes; if (n.value == Intersection)) yield n
-		if (intersections.isEmpty) NoStep(g)
-		else {
-			val intersection = intersections.head
-			val members = (for (e <- intersection.from; if (e.value == Member)) yield e).toList
-			// XXX: Handle 0 members
-			if (members.length == 1) removeTrivialIntersection(intersection)
-			else solveIntersection(g, members(0).id, members(1).id)
+	def allPairs[A](list: List[A]): List[(A,A)] = {
+		def allPairs0(list0: List[A], acc: List[(A,A)]): List[(A,A)] = {
+			list0 match {
+				case Nil => acc
+				case head::tail => {
+					val headPairings = for (a <- tail) yield (head, a)
+					allPairs0(tail, acc ++ headPairings)
+				}
+			}
 		}
+		allPairs0(list, Nil)
+	}
+	
+	def solveIntersection1(g: Graph[NodeLabel,EdgeLabel]): StepResult = {
+		def solveIntersection10(intersections0: List[NodeFocus[NodeLabel,EdgeLabel]]): StepResult = {
+			intersections0 match {
+				case Nil => NoStep(g)
+				case intersection::tail => {
+					val members = (for (e <- intersection.from; if (e.value == Member)) yield e).toList
+					if (members.length == 1) removeTrivialIntersection(intersection)
+					else {
+						def solvePairs(pairs: List[(EdgeFocus[NodeLabel,EdgeLabel],EdgeFocus[NodeLabel,EdgeLabel])]): StepResult = {
+							pairs match {
+								case Nil => NoStep(g)
+								case (a, b)::tail => solveIntersection(g, a.id, b.id) match {
+									case ns: NoStep => solvePairs(tail)
+									case s: Step => s
+								}
+							}
+						}
+						solvePairs(allPairs(members)) match {
+							case ns: NoStep => solveIntersection10(tail)
+							case s: Step => s
+						}
+					}
+				}
+			}
+		}
+		val intersections = for (n <- g.nodes; if (n.value == Intersection)) yield n
+		solveIntersection10(intersections.toList)
 	}
 	
 	def removeTrivialIntersection(nf: NodeFocus[NodeLabel,EdgeLabel]): StepResult = {
@@ -625,15 +669,6 @@ object Lang8 {
 			val intersectionResult = instantiate(instantiationEdge)
 			Step(intersectionResult.unfocus, "Instantiated " + instantiationEdge.from.id + " and " + instantiationEdge.to.id + " into " + intersectionResult.id)
 		}
-			/*
-			val target = e.from
-			val targetBindings = for (e <- target.to; if (e.value == Binding)) yield e
-			assert(targetBindings.length == 1)
-			val targetBinding = targetBindings(0)
-			for (binding <- e.to.edges; if (binding.value == Binding)) {
-			
-			}
-			*/
 	}
 	
 	def main(args: Array[String]): Unit = {
