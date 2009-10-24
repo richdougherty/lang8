@@ -472,8 +472,8 @@ object Lang8 {
 
 		(e1f.to.value, e2f.to.value) match {
 			case (Variable, _) => {
-				val g2 = relinkMatchingInEdges(g.node(e2f.to.id), e1f.to.id, nonBinding).node(e2f.to.id).delete
-				Step(g2, "Removed variable " + e1f.to.id + " from intersection")
+				val g2 = relinkMatchingInEdges(g.node(e1f.to.id), e2f.to.id, nonBinding).node(e1f.to.id).delete
+				Step(g2, "Merged intersected variable " + e1f.to.id + " into " + e2f.to.id)
 			}
 			case (Intersection, _) => {
 				val parent = e1f.from
