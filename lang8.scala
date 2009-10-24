@@ -430,10 +430,7 @@ object Lang8 {
 		
 		// 2. Copy all edges, replacing one or both ends with the new node.
 		// Binding nodes are rebound to parent of instantiation target.
-		val bindingParentId = {
-			val target = g1.node(instantiationTargetId)
-			inEdgeByLabel(target, Binding).get.from.id
-		}
+		val bindingParentId = inEdgeByLabel(nf, Binding).get.from.id
 		def copyEdge(ef: EdgeFocus[NodeLabel,EdgeLabel], copies: List[(NodeId,NodeId)]): EdgeFocus[NodeLabel,EdgeLabel] = {
 			val value = ef.value
 			val oldFrom = ef.from.id
@@ -558,6 +555,24 @@ object Lang8 {
 		}
 	}
 	
+	def bindings(n: NodeFocus[NodeLabel,EdgeLabel]): List[NodeId] = {
+		// Make tail recursive?
+		inEdgeByLabel(n, Binding) match {
+			case None => Nil
+			case Some(e) => {
+				e.id::bindings(e.from)
+			}
+		}
+	}
+	
+	/*def commonBinding(g: Graph[NodeLabel,EdgeLabel], n1: NodeId, n2: NodeId): Option[NodeId] = {
+		// XXX: Not the most efficient approach :)
+		val b1 = bindings(n1)
+		val b2 = bindings(n2)
+		val matches = for (bn1 <- b1; bn2 <- b2; if (bn1.id == bn2.id)) yield bn1.id
+		if (matches.isEmpty) None else Some(matches.head)
+	}*/
+	
 	def merge1(g: Graph[NodeLabel,EdgeLabel]): StepResult = {
 		for (n1 <- g.nodes; n2 <- g.nodes; if (n1.id != n2.id)) {
 			//println(n1.id + " eq " + n2.id)
@@ -565,7 +580,10 @@ object Lang8 {
 				// XXX: Choose binding edge?
 				// XXX: Copy instantiation edges?
 				//println("found match")
-				return Step(relinkMatchingInEdges(g.node(n2.id), n1.id, nonBinding).node(n2.id).delete, "Merged " + n1.id + " and " + n2.id)
+				val b1 = bindings(n1)
+				val b2 = bindings(n2)
+				val (keep, delete) = if (b1.length < b2.length) (n1.id, n2.id) else (n2.id, n1.id)
+				return Step(relinkMatchingInEdges(g.node(delete), keep, nonBinding).node(delete).delete, "Merged equal value " + delete + " into " + keep)
 			}
 		}	
 		//println("no matches")
@@ -711,7 +729,7 @@ object Lang8 {
 		
 		val stepFunctions: List[Graph[NodeLabel,EdgeLabel]=>StepResult] = List(
 			markSweep _,
-			//merge1 _,
+			merge1 _,
 			solveIntersection1 _,
 			instantiate1 _
 		)
