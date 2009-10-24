@@ -177,14 +177,16 @@ object Lang8 {
 	case object Union extends NodeLabel
 	case object Impossible extends NodeLabel
 	case object Choose extends NodeLabel
-	case object Instance extends NodeLabel
+	case object Instantiation extends NodeLabel
 	
 	trait EdgeLabel
 	// For lambda
 	case object Domain extends EdgeLabel
 	case object Codomain extends EdgeLabel
 	case object Binding extends EdgeLabel
-	case object Instantiate extends EdgeLabel
+	// For instantiation
+	case object Template extends EdgeLabel
+	case object Target extends EdgeLabel
 	// For box/unbox
 	case object Content extends EdgeLabel
 	// For pair
@@ -276,33 +278,27 @@ object Lang8 {
 		.addNode("in", Variable)
 		.addNode("mid", Variable)
 		.addNode("out", Variable)
-		.addNode("lam1inter", Intersection)
-		.addNode("lam1inst", Instance)
-		.addNode("lam1match", Lambda)
-		.addNode("lam2inter", Intersection)
-		.addNode("lam2inst", Instance)
-		.addNode("lam2match", Lambda)
+		.addNode("lam1inst", Instantiation)
+		.addNode("lam1target", Lambda)
+		.addNode("lam2inst", Instantiation)
+		.addNode("lam2target", Lambda)
 		.addEdge(Codomain, "top", "in")
 		.addEdge(Domain, "top", "out")
-		.addEdge(Codomain, "lam1match", "in")
-		.addEdge(Domain, "lam1match", "mid")
-		.addEdge(Codomain, "lam2match", "mid")
-		.addEdge(Domain, "lam2match", "out")
-		.addEdge(Member, "lam1inter", "lam1match")
-		.addEdge(Member, "lam1inter", "lam1inst")
-		.addEdge(Member, "lam2inter", "lam2match")
-		.addEdge(Member, "lam2inter", "lam2inst")
-		.addEdge(Instantiate, "lam1inst", "lam1")
-		.addEdge(Instantiate, "lam2inst", "lam2")
+		.addEdge(Codomain, "lam1target", "in")
+		.addEdge(Domain, "lam1target", "mid")
+		.addEdge(Codomain, "lam2target", "mid")
+		.addEdge(Domain, "lam2target", "out")
+		.addEdge(Template, "lam1inst", "lam1")
+		.addEdge(Target, "lam1inst", "lam1target")
+		.addEdge(Template, "lam2inst", "lam2")
+		.addEdge(Target, "lam2inst", "lam2target")
 		.addEdge(Binding, "top", "in")
 		.addEdge(Binding, "top", "mid")
 		.addEdge(Binding, "top", "out")
-		.addEdge(Binding, "top", "lam1inter")
-		.addEdge(Binding, "top", "lam2inter")
-		.addEdge(Binding, "top", "lam1match")
-		.addEdge(Binding, "top", "lam2match")
 		.addEdge(Binding, "top", "lam1inst")
 		.addEdge(Binding, "top", "lam2inst")
+		.addEdge(Binding, "top", "lam1target")
+		.addEdge(Binding, "top", "lam2target")
 		.node("top")
 	}
 	
@@ -404,8 +400,7 @@ object Lang8 {
 	case class Step(g: Graph[NodeLabel,EdgeLabel], description: String) extends StepResult
 	
 	// input is focus on instantiation edge, output is focus on created intersection node
-	def instantiate(ef: EdgeFocus[NodeLabel,EdgeLabel]): NodeFocus[NodeLabel,EdgeLabel] = {
-		println(ef)
+	def instantiate(nf: NodeFocus[NodeLabel,EdgeLabel]): NodeFocus[NodeLabel,EdgeLabel] = {
 		// 1. Copy all nodes bound by target of instantiation (including target).
 		// Keep a record of their counterparts.
 		def copyNodes(g: Graph[NodeLabel,EdgeLabel], sourceNodes: List[NodeId], acc: List[(NodeId,NodeId)]): (Graph[NodeLabel,EdgeLabel], List[(NodeId,NodeId)]) = {
@@ -421,10 +416,13 @@ object Lang8 {
 				}
 			}
 		}
-		val instantiationTargetId = ef.from.id
-		val instantiationTemplateId = ef.to.id
-		val children = (for (e <- ef.to.from; if (e.value == Binding)) yield e.to.id).toList
-		val (g1, copies) = copyNodes(ef.unfocus, instantiationTemplateId::children, Nil)
+		val target = outEdgeByLabel(nf, Target).get.to
+		val template = outEdgeByLabel(nf, Template).get.to
+		
+		val instantiationTargetId = target.id
+		val instantiationTemplateId = template.id
+		val children = (for (e <- template.from; if (e.value == Binding)) yield e.to.id).toList
+		val (g1, copies) = copyNodes(nf.unfocus, instantiationTemplateId::children, Nil)
 		val instantiation = lookup(copies, instantiationTemplateId).get
 		
 		// 2. Copy all edges, replacing one or both ends with the new node.
@@ -451,7 +449,7 @@ object Lang8 {
 		val g2 = copyEdges(g1, copies)
 		val g3 = g2.node(bindingParentId).link(Binding, instantiation).unfocus		
 		val nf4 = g3.addNode(Intersection)
-		val g5 = nf4.unfocus.edge(ef.id).delete.unfocus
+		val g5 = nf4.unfocus.node(nf.id).delete
 		val g6 = g5.node(bindingParentId).link(Binding, nf4.id).unfocus
 		g6.node(nf4.id)
 			.link(Member, instantiationTargetId)
@@ -473,15 +471,9 @@ object Lang8 {
 		if (e1f.to.id == e2f.to.id) return Step(e2f.delete.unfocus, "Removed duplicated member edge to " + e1f.to.id)
 
 		(e1f.to.value, e2f.to.value) match {
-			case (_, Variable | Intersection | Instance) => {
-				solveIntersection(g, e2, e1)
-			}
 			case (Variable, _) => {
-				Step(e1f.to.delete, "Removed variable " + e1f.to.id + " from intersection")
-			}
-			case (Instance, _) => {
-				// Cannot solve intersection until instantiated?
-				NoStep(g)
+				val g2 = relinkMatchingInEdges(g.node(e2f.to.id), e1f.to.id, nonBinding).node(e2f.to.id).delete
+				Step(g2, "Removed variable " + e1f.to.id + " from intersection")
 			}
 			case (Intersection, _) => {
 				val parent = e1f.from
@@ -543,6 +535,10 @@ object Lang8 {
 				val pair1RightInter = replaceWithIntersection(g2, List(pair1Right.id, pair2Right.id))
 				val g3 = pair1RightInter.unfocus
 				Step(g3, "Intersected pairs " + pair1.id + " and " + pair2.id)
+			}
+			case (_, Variable | Intersection) => {
+				// reverse edges to support easier pattern matching
+				solveIntersection(g, e2, e1)
 			}
 			case (a, b) => {
 				error("Cannot solve intersection between " + a + " and " + b + ".")
@@ -624,6 +620,7 @@ object Lang8 {
 	
 	def solveIntersection1(g: Graph[NodeLabel,EdgeLabel]): StepResult = {
 		def solveIntersection10(intersections0: List[NodeFocus[NodeLabel,EdgeLabel]]): StepResult = {
+			//println("solveIntersection10")
 			intersections0 match {
 				case Nil => NoStep(g)
 				case intersection::tail => {
@@ -631,6 +628,7 @@ object Lang8 {
 					if (members.length == 1) removeTrivialIntersection(intersection)
 					else {
 						def solvePairs(pairs: List[(EdgeFocus[NodeLabel,EdgeLabel],EdgeFocus[NodeLabel,EdgeLabel])]): StepResult = {
+							//println("solvePairs")
 							pairs match {
 								case Nil => NoStep(g)
 								case (a, b)::tail => solveIntersection(g, a.id, b.id) match {
@@ -662,12 +660,12 @@ object Lang8 {
 
 	
 	def instantiate1(g: Graph[NodeLabel,EdgeLabel]): StepResult = {
-		val instantiations = (for (e <- g.edges; if (e.value == Instantiate)) yield e).toList
+		val instantiations = (for (n <- g.nodes; if (n.value == Instantiation)) yield n).toList
 		if (instantiations.isEmpty) NoStep(g)
 		else {
-			val instantiationEdge = instantiations(0)
-			val intersectionResult = instantiate(instantiationEdge)
-			Step(intersectionResult.unfocus, "Instantiated " + instantiationEdge.from.id + " and " + instantiationEdge.to.id + " into " + intersectionResult.id)
+			val instantiation = instantiations(0)
+			val instantiationResult = instantiate(instantiation)
+			Step(instantiationResult.unfocus, "Instantiated " + instantiation.id)
 		}
 	}
 	
@@ -680,16 +678,10 @@ object Lang8 {
 		val start = idIdFocus.unfocus
 		
 		val stepFunctions: List[Graph[NodeLabel,EdgeLabel]=>StepResult] = List(
-			merge1 _,
+			//merge1 _,
 			solveIntersection1 _,
 			instantiate1 _
 		)
-	
-		def fixpoint[A](f: A => A, a: A): A = {
-			val result = f(a)
-			if (result == a) a
-			else (fixpoint(f, result))
-		}
 
 		def step1(g: Graph[NodeLabel,EdgeLabel]): StepResult = {
 			def step10(fs: List[Graph[NodeLabel,EdgeLabel]=>StepResult]): StepResult = {
@@ -704,28 +696,21 @@ object Lang8 {
 			step10(stepFunctions)
 		}
 		
-		def fixpointSearch[A](g: Graph[NodeLabel,EdgeLabel]): List[Step] = {
-			def search0(g1: Graph[NodeLabel,EdgeLabel], acc: List[Step]): List[Step] = {
-				try {
-					step1(g1) match {
-						case NoStep(g2) => {
-							acc.reverse
-						}
-						case s @ Step(g2, _) => {
-							search0(g2, s::acc)
-						}
+		def run[A](g: Graph[NodeLabel,EdgeLabel]): Stream[Step] = {
+			def run0(g1: Graph[NodeLabel,EdgeLabel]): Stream[Step] = {
+				step1(g1) match {
+					case NoStep(g2) => {
+						Stream.empty
 					}
-				} catch {
-					case e => {
-						e.printStackTrace
-						acc.reverse
+					case s @ Step(g2, _) => {
+						Stream.cons(s, run0(g2))
 					}
 				}
 			}
-			search0(g, Step(g, "Initial")::Nil)
+			Stream.cons(Step(g, "Initial"), run0(g))
 		}
 		
-		val gs = fixpointSearch(start)
+		val gs = run(start)
 		for ((Step(g, desc), i) <- gs.zipWithIndex) {
 			println("Step " + i + ": " + desc)
 			import java.io._
@@ -737,7 +722,5 @@ object Lang8 {
 				os.close
 			}
 		}
-		//printDot(fixpoint(solveIntersection1 _, fixpoint(instantiate1 _, start)))
-		//printDot(solveIntersection1(solveIntersection1(solveIntersection1(solveIntersection1(solveIntersection1(instantiate1(instantiate1(start))))))))
 	}
 }
