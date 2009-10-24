@@ -167,6 +167,7 @@ object Lang8 {
 	import GraphUtils._
 
 	trait NodeLabel
+	case object Root extends NodeLabel
 	case object Variable extends NodeLabel
 	case object Lambda extends NodeLabel
 	case object Box extends NodeLabel
@@ -180,6 +181,8 @@ object Lang8 {
 	case object Instantiation extends NodeLabel
 	
 	trait EdgeLabel
+	// For root
+	case object Pin extends EdgeLabel
 	// For lambda
 	case object Domain extends EdgeLabel
 	case object Codomain extends EdgeLabel
@@ -597,6 +600,26 @@ object Lang8 {
 		}
 	}
 	
+	def markSweep(g: Graph[NodeLabel,EdgeLabel]): StepResult = {
+		val rootValues = List(Root, Instantiation, Intersection)
+		def mark(pending: List[NodeId], marked: List[NodeId]): List[NodeId] = {
+			pending match {
+				case Nil =>
+					marked
+				case head::tail => {
+					val refs = for (e <- g.node(head).from; if (e.value != Binding)) yield e.to.id
+					val unmarkedRefs = for (r <- refs; if (!marked.contains(refs))) yield r
+					mark(unmarkedRefs.toList ++ tail, head::marked)
+				}
+			}
+		}
+		val roots = for (n <- g.nodes; if (rootValues.contains(n.value))) yield n.id
+		val marked = mark(roots.toList, Nil)
+		// sweep
+		val g2 = g.nodes.foldLeft(g) { case (g1, n) => if (marked.contains(n.id)) g1 else g1.node(n.id).delete }
+		if (g == g2) NoStep(g) else Step(g2, "Garbage collection")
+	}
+	
 	// steps:
 	// - garbage collection
 	// - instantiation
@@ -676,8 +699,18 @@ object Lang8 {
 		val idIdFocus = createComposition(swapSwapFocus.unfocus, idFocus.id, idFocus.id)
 		//val integerLib = createIntegerLib(swapSwapFocus.unfocus)
 		val start = idIdFocus.unfocus
+			.addNode(Root)
+			.link(Pin, swapFocus.id)
+			.from
+			.link(Pin, idFocus.id)
+			.from
+			.link(Pin, swapSwapFocus.id)
+			.from
+			.link(Pin, idIdFocus.id)
+			.unfocus
 		
 		val stepFunctions: List[Graph[NodeLabel,EdgeLabel]=>StepResult] = List(
+			markSweep _,
 			//merge1 _,
 			solveIntersection1 _,
 			instantiate1 _
