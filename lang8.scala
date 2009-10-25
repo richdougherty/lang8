@@ -539,8 +539,9 @@ object Lang8 {
 				// XXX: Think about bindings!
 				// XXX: Copy in-links???
 				// XXX: Merge nodes?
-				val pair1 = e1f.to
-				val pair2 = e2f.to
+				val pair1Id::pair2Id::Nil = sortByDominant(g, e1f.to.id::e2f.to.id::Nil)
+				val pair1 = g.node(pair1Id)
+				val pair2 = g.node(pair2Id)
 				
 				val pair1Left = outEdgeByLabel(pair1, Left).get.to
 				val pair1Right = outEdgeByLabel(pair1, Right).get.to
