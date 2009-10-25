@@ -514,14 +514,14 @@ object Lang8 {
 				// XXX: Think about bindings!
 				// XXX: Copy in-links???
 				// XXX: Merge nodes?
-				val lam1 = e1f.to
-				val lam2 = e2f.to
+				val lam1Id::lam2Id::Nil = sortByDominant(g, e1f.to.id::e2f.to.id::Nil)
+				val lam1 = g.node(lam1Id)
+				val lam2 = g.node(lam2Id)
 				
 				val lam1Dom = outEdgeByLabel(lam1, Domain).get.to
 				val lam1Cod = outEdgeByLabel(lam1, Codomain).get.to
 				val lam2Dom = outEdgeByLabel(lam2, Domain).get.to
 				val lam2Cod = outEdgeByLabel(lam2, Codomain).get.to
-				
 				
 				// Delete
 				val g1 = g.node(lam2.id).delete // XXX: Need to check all out-edges were copied when intersection was made
@@ -594,16 +594,22 @@ object Lang8 {
 		if (matches.isEmpty) None else Some(matches.head)
 	}*/
 	
+	def sortByDominant(g: Graph[NodeLabel,EdgeLabel], nodes: List[NodeId]): List[NodeId] = {
+		(for (c <- nodes) yield {
+			val b = bindings(g.node(c))
+			(c, b.length)
+		}) sortWith {
+			case ((_, bl1), (_, bl2)) => bl1 < bl2
+		} map {
+			case (c, b) => c
+		}
+	}
+	
 	def merge1(g: Graph[NodeLabel,EdgeLabel]): StepResult = {
 		for (n1 <- g.nodes; n2 <- g.nodes; if (n1.id != n2.id)) {
 			//println(n1.id + " eq " + n2.id)
 			if (equalValue(g, n1.id, n2.id)) {
-				// XXX: Choose binding edge?
-				// XXX: Copy instantiation edges?
-				//println("found match")
-				val b1 = bindings(n1)
-				val b2 = bindings(n2)
-				val (keep, delete) = if (b1.length < b2.length) (n1.id, n2.id) else (n2.id, n1.id)
+				val keep::delete::Nil = sortByDominant(g, n1.id::n2.id::Nil)
 				return Step(relinkMatchingInEdges(g.node(delete), keep, nonBinding).node(delete).delete, "Merged equal value " + delete + " into " + keep)
 			}
 		}	
