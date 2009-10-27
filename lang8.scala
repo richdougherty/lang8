@@ -539,7 +539,7 @@ object Lang8 {
 		//println("no matches")
 		NoStep(g)
 	}
-
+	
 	def equalValue(g: Graph[NodeLabel,EdgeLabel], nid1: NodeId, nid2: NodeId): Boolean = {
 		// XXX: Handle cycles.
 		if (nid1 == nid2) true
@@ -552,14 +552,14 @@ object Lang8 {
 					val pair1Right = outEdgeByLabel(nf1, Right).get.to
 					val pair2Left = outEdgeByLabel(nf2, Left).get.to
 					val pair2Right = outEdgeByLabel(nf2, Right).get.to
-					equalValue(g, pair1Left.id, pair2Left.id) && equalValue(g, pair1Right.id, pair2Right.id)
+					((pair1Left.id == pair2Left.id) && (pair1Right.id == pair2Right.id))
 				}
 				case (Lambda, Lambda) => {
 					val lam1Dom = outEdgeByLabel(nf1, Domain).get.to
 					val lam1Cod = outEdgeByLabel(nf1, Codomain).get.to
 					val lam2Dom = outEdgeByLabel(nf2, Domain).get.to
 					val lam2Cod = outEdgeByLabel(nf2, Codomain).get.to
-					equalValue(g, lam1Dom.id, lam2Dom.id) && equalValue(g, lam1Cod.id, lam2Cod.id)
+					((lam1Dom.id == lam2Dom.id) && (lam1Cod.id == lam2Cod.id))
 				}
 				case (_, _) => {
 					false
