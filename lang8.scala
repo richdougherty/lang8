@@ -174,14 +174,8 @@ object Lang8 {
 	case object Root extends NodeLabel
 	case object Variable extends NodeLabel
 	case object Lambda extends NodeLabel
-	case object Box extends NodeLabel
-	case object Unbox extends NodeLabel
 	case object Pair extends NodeLabel
 	case object Symbol extends NodeLabel
-	case object Intersection extends NodeLabel
-	case object Union extends NodeLabel
-	case object Impossible extends NodeLabel
-	case object Choose extends NodeLabel
 	case object Instantiation extends NodeLabel
 	
 	trait EdgeLabel
@@ -194,17 +188,9 @@ object Lang8 {
 	// For instantiation
 	case object Template extends EdgeLabel
 	case object Target extends EdgeLabel
-	// For box/unbox
-	case object Content extends EdgeLabel
 	// For pair
 	case object Left extends EdgeLabel
 	case object Right extends EdgeLabel
-	// For intersection/union
-	case object Member extends EdgeLabel
-	// For choose
-	case object Argument extends EdgeLabel
-	case object Equal extends EdgeLabel
-	case object NotEqual extends EdgeLabel
 	
 	// Id
 	def createId(g: Graph[NodeLabel,EdgeLabel]): NodeFocus[NodeLabel,EdgeLabel] = {
@@ -404,35 +390,6 @@ object Lang8 {
 		}
 	}
 	
-	def replaceWithIntersection(g: Graph[NodeLabel,EdgeLabel], nids: List[NodeId]): NodeFocus[NodeLabel,EdgeLabel] = {
-		assert(!nids.isEmpty)
-		val inter = g.addNode(Intersection)
-		val g1 = inter.unfocus
-		
-		// Calculate binding for intersection by looking at bindings for member nodes.
-		// XXX: Not sure of exact algorithm yet.
-		val g2 = inEdgeByLabel(g1.node(nids.head), Binding).get.from.link(Binding, inter.id).unfocus
-		
-		// Move existing member in-edges to intersection
-		val g3 = nids.foldLeft(g2) { case (g, nid) => relinkMatchingInEdges(g.node(nid), inter.id, nonBinding) }
-		// XXX: Handle outgoing edges! e.g. instantiation
-		
-		// Add member edges
-		val g4 = nids.foldLeft(g3) { case (g, nid) => g.node(inter.id).link(Member, nid).unfocus }
-		
-		g4.node(inter.id)
-	}
-	
-	// Should be in Scala 2.8
-	def groupBy[K,V](xs: Iterable[V], f: (V) => K): Map[K, Set[V]] =
-		xs.foldLeft(Map[K,Set[V]]() withDefaultValue Set()) {
-			case (map, x) => {
-				val k = f(x)
-				val set = map(k) + x
-				map.updated(k, set)
-			}
-		}
-	
 	def unify(g: Graph[NodeLabel,EdgeLabel], nids: List[NodeId]): NodeFocus[NodeLabel,EdgeLabel] = {
 		assert(!nids.isEmpty)
 		// merge equal nids
@@ -501,7 +458,7 @@ object Lang8 {
 	case class NoStep(g: Graph[NodeLabel,EdgeLabel]) extends StepResult
 	case class Step(g: Graph[NodeLabel,EdgeLabel], description: String) extends StepResult
 	
-	// input is focus on instantiation edge, output is focus on created intersection node
+	// input is focus on instantiation edge, output is focus on result node
 	def instantiate(nf: NodeFocus[NodeLabel,EdgeLabel]): NodeFocus[NodeLabel,EdgeLabel] = {
 		// 1. Copy all nodes bound by target of instantiation (including target).
 		// Keep a record of their counterparts.
@@ -550,104 +507,6 @@ object Lang8 {
 		unify(g3, List(instantiationTargetId, instantiation))
 	}
 	
-	def solveIntersection(g: Graph[NodeLabel,EdgeLabel], e1: EdgeId, e2: EdgeId): StepResult = {
-	
-		val e1f = g.edge(e1)
-		val e2f = g.edge(e2)
-		assert(e1f.from.id == e2f.from.id)
-		assert(e1f.from.value == Intersection)
-		assert(e1f.value == Member)
-		assert(e2f.value == Member)
-
-		// Handle duplicate membership - can happen when copying edges
-		if (e1f.to.id == e2f.to.id) return Step(e2f.delete.unfocus, "Removed duplicated member edge to " + e1f.to.id)
-
-		(e1f.to.value, e2f.to.value) match {
-			case (Variable, _) => {
-				val g2 = relinkMatchingInEdges(g.node(e1f.to.id), e2f.to.id, nonBinding).node(e1f.to.id).delete
-				Step(g2, "Merged intersected variable " + e1f.to.id + " into " + e2f.to.id)
-			}
-			case (Intersection, _) => {
-				val parent = e1f.from
-				val child = e1f.to
-				// Delete member link to child intersection
-				val g1 = e1f.delete.unfocus
-				// Copy all edges from child to parent intersection
-				val g2 = relinkMatchingInEdges(g1.node(child.id), parent.id, nonBinding)
-				// Delete child intersection
-				val g3 = g2.node(child.id).delete
-				Step(g3, "Merged child intersection " + child.id + " with parent " + parent.id)
-			}
-			case (Lambda, Lambda) => {
-				val inter = e1f.from
-				val interBinder = inEdgeByLabel(inter, Binding).get.from
-
-				// XXX: Think about bindings!
-				// XXX: Copy in-links???
-				// XXX: Merge nodes?
-				val lam1Id::lam2Id::Nil = sortByDominant(g, e1f.to.id::e2f.to.id::Nil)
-				val lam1 = g.node(lam1Id)
-				val lam2 = g.node(lam2Id)
-				
-				val lam1Dom = outEdgeByLabel(lam1, Domain).get.to
-				val lam1Cod = outEdgeByLabel(lam1, Codomain).get.to
-				val lam2Dom = outEdgeByLabel(lam2, Domain).get.to
-				val lam2Cod = outEdgeByLabel(lam2, Codomain).get.to
-				
-				// Delete
-				val g1 = g.node(lam2.id).delete // XXX: Need to check all out-edges were copied when intersection was made
-				
-				val lam1DomInter = replaceWithIntersection(g1, List(lam1Dom.id, lam2Dom.id))
-				val g2 = lam1DomInter.unfocus
-				val lam1CodInter = replaceWithIntersection(g2, List(lam1Cod.id, lam2Cod.id))
-				val g3 = lam1CodInter.unfocus
-				Step(g3, "Intersected lambdas " + lam1.id + " and " + lam2.id)
-			}
-			case (Pair, Pair) => {
-				val inter = e1f.from
-				val interBinder = inEdgeByLabel(inter, Binding).get.from
-
-				// XXX: Think about bindings!
-				// XXX: Copy in-links???
-				// XXX: Merge nodes?
-				val pair1Id::pair2Id::Nil = sortByDominant(g, e1f.to.id::e2f.to.id::Nil)
-				val pair1 = g.node(pair1Id)
-				val pair2 = g.node(pair2Id)
-				
-				val pair1Left = outEdgeByLabel(pair1, Left).get.to
-				val pair1Right = outEdgeByLabel(pair1, Right).get.to
-				val pair2Left = outEdgeByLabel(pair2, Left).get.to
-				val pair2Right = outEdgeByLabel(pair2, Right).get.to
-				
-				
-				// Delete
-				val g1 = g.node(pair2.id).delete // XXX: Need to check all out-edges were copied when intersection was made
-				
-				val pair1LeftInter = replaceWithIntersection(g1, List(pair1Left.id, pair2Left.id))
-				val g2 = pair1LeftInter.unfocus
-				val pair1RightInter = replaceWithIntersection(g2, List(pair1Right.id, pair2Right.id))
-				val g3 = pair1RightInter.unfocus
-				Step(g3, "Intersected pairs " + pair1.id + " and " + pair2.id)
-			}
-			case (_, Variable | Intersection) => {
-				// reverse edges to support easier pattern matching
-				solveIntersection(g, e2, e1)
-			}
-			case (a, b) => {
-				error("Cannot solve intersection between " + a + " and " + b + ".")
-			}
-			
-			/*case (_, _) if (e1f.to.id == e2f.to.id) => 
-			case (Variable, Variable) => // merge into single variable
-			case (Lambda, Lambda) => // merge and intersect domain/codomain
-			case (Pair, Pair) => // merge and intersect left/right
-			case (Symbol, Symbol) => // never merge (only equal if actually same node)
-			case (Box, _) || (_, Box) =>
-			// cannot intersect box/unbox
-			case _ => g*/
-		}
-	}
-	
 	def bindings(n: NodeFocus[NodeLabel,EdgeLabel]): List[NodeId] = {
 		// Make tail recursive?
 		inEdgeByLabel(n, Binding) match {
@@ -657,14 +516,6 @@ object Lang8 {
 			}
 		}
 	}
-	
-	/*def commonBinding(g: Graph[NodeLabel,EdgeLabel], n1: NodeId, n2: NodeId): Option[NodeId] = {
-		// XXX: Not the most efficient approach :)
-		val b1 = bindings(n1)
-		val b2 = bindings(n2)
-		val matches = for (bn1 <- b1; bn2 <- b2; if (bn1.id == bn2.id)) yield bn1.id
-		if (matches.isEmpty) None else Some(matches.head)
-	}*/
 	
 	def sortByDominant(g: Graph[NodeLabel,EdgeLabel], nodes: List[NodeId]): List[NodeId] = {
 		(for (c <- nodes) yield {
@@ -718,7 +569,7 @@ object Lang8 {
 	}
 	
 	def markSweep(g: Graph[NodeLabel,EdgeLabel]): StepResult = {
-		val rootValues = List(Root, Instantiation, Intersection)
+		val rootValues = List(Root, Instantiation)
 		def mark(pending: List[NodeId], marked: List[NodeId]): List[NodeId] = {
 			pending match {
 				case Nil =>
@@ -740,9 +591,7 @@ object Lang8 {
 	// steps:
 	// - garbage collection
 	// - instantiation
-	// - unification (intersection)
-	// - remove intersections/unions with single member
-	// - combine parent/child intersections/unions
+	// - unification
 	// - unboxing
 	
 	def allPairs[A](list: List[A]): List[(A,A)] = {
@@ -757,47 +606,6 @@ object Lang8 {
 		}
 		allPairs0(list, Nil)
 	}
-	
-	def solveIntersection1(g: Graph[NodeLabel,EdgeLabel]): StepResult = {
-		def solveIntersection10(intersections0: List[NodeFocus[NodeLabel,EdgeLabel]]): StepResult = {
-			//println("solveIntersection10")
-			intersections0 match {
-				case Nil => NoStep(g)
-				case intersection::tail => {
-					val members = (for (e <- intersection.from; if (e.value == Member)) yield e).toList
-					if (members.length == 1) removeTrivialIntersection(intersection)
-					else {
-						def solvePairs(pairs: List[(EdgeFocus[NodeLabel,EdgeLabel],EdgeFocus[NodeLabel,EdgeLabel])]): StepResult = {
-							//println("solvePairs")
-							pairs match {
-								case Nil => NoStep(g)
-								case (a, b)::tail => solveIntersection(g, a.id, b.id) match {
-									case ns: NoStep => solvePairs(tail)
-									case s: Step => s
-								}
-							}
-						}
-						solvePairs(allPairs(members)) match {
-							case ns: NoStep => solveIntersection10(tail)
-							case s: Step => s
-						}
-					}
-				}
-			}
-		}
-		val intersections = for (n <- g.nodes; if (n.value == Intersection)) yield n
-		solveIntersection10(intersections.toList)
-	}
-	
-	def removeTrivialIntersection(nf: NodeFocus[NodeLabel,EdgeLabel]): StepResult = {
-		val outgoing = (for (ef <- nf.from) yield ef).toList
-		assert(outgoing.size == 1)
-		val memberEdge = outgoing(0)
-		assert(memberEdge.value == Member)
-		Step(relinkMatchingInEdges(nf, memberEdge.to.id, nonBinding).node(nf.id).delete, "Removed trivial intersection " + nf.id)
-		// XXX: Should relink instantiation edge too!
-	}
-
 	
 	def instantiate1(g: Graph[NodeLabel,EdgeLabel]): StepResult = {
 		val instantiations = (for (n <- g.nodes; if (n.value == Instantiation)) yield n).toList
@@ -832,7 +640,6 @@ object Lang8 {
 		val stepFunctions: List[Graph[NodeLabel,EdgeLabel]=>StepResult] = List(
 			markSweep _,
 			merge1 _,
-			solveIntersection1 _,
 			instantiate1 _
 		)
 
