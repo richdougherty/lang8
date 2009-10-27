@@ -71,6 +71,10 @@ object Graph {
 import Graph._
 class Graph[+N,+E](val nextId: Int, val nmap: Map[NodeId,NodeData[N]], val emap: Map[NodeId,EdgeData[E]]) {
 
+	def containsNode(id: NodeId): Boolean =
+		nmap.contains(id)
+	def containsEdge(id: EdgeId): Boolean =
+		emap.contains(id)
 	def node(id: NodeId): NodeFocus[N,E] =
 		new NodeFocus(this, id, nmap(id))
 	def edge(id: EdgeId): EdgeFocus[N,E] =
@@ -417,6 +421,80 @@ object Lang8 {
 		val g4 = nids.foldLeft(g3) { case (g, nid) => g.node(inter.id).link(Member, nid).unfocus }
 		
 		g4.node(inter.id)
+	}
+	
+	// Should be in Scala 2.8
+	def groupBy[K,V](xs: Iterable[V], f: (V) => K): Map[K, Set[V]] =
+		xs.foldLeft(Map[K,Set[V]]() withDefaultValue Set()) {
+			case (map, x) => {
+				val k = f(x)
+				val set = map(k) + x
+				map.updated(k, set)
+			}
+		}
+	
+	def unify(g: Graph[NodeLabel,EdgeLabel], nids: List[NodeId]): NodeFocus[NodeLabel,EdgeLabel] = {
+		assert(!nids.isEmpty)
+		// merge equal nids
+		val uniqueNids = nids.removeDuplicates
+		if (nids.length == 1) g.node(nids.head)
+		else {
+			// Find value for replacement node
+			val values = uniqueNids map {
+				case nid => g.node(nid).value
+			} filter {
+				case value => value != Variable
+			} removeDuplicates
+			val value: NodeLabel = values match {
+				case Nil => Variable
+				case head::Nil => g.node(nids.head).value
+				case _ => error("Cannot unify nodes with different types: " + values)
+			}
+			// Find binder for replacement node
+			val topBinder: Option[NodeId] = uniqueNids map {
+				case nid => {
+					(nid, bindings(g.node(nid)))
+					}
+			} sortWith {
+				case ((nid1, binders1), (nid2, binders2)) => binders1.length < binders2.length
+			} match {
+				case (_, Nil)::_ => None
+				case (nid, _)::_ => Some(inEdgeByLabel(g.node(nid), Binding).get.from.id)
+				case Nil => error("should never occur!")
+			}
+			// Create list of all outgoing edges
+			val outgoingLabels = (for (nid <- uniqueNids; e <- g.node(nid).from) yield {
+				e.value
+			}).toList removeDuplicates
+			
+			// Create replacement node
+			val replacement = g.addNode(value)
+			val g1 = replacement.unfocus
+			val g2 = topBinder match {
+				case None => g1
+				case Some(nid) => g1.node(nid).link(Binding, replacement.id).unfocus
+			}
+			val g3 = uniqueNids.foldLeft(g2) {
+				case (gx, nid) => relinkMatchingInEdges(gx.node(nid), replacement.id, nonBinding)
+			}
+			val g4 = outgoingLabels.foldLeft(g3) {
+				case (gx, label) => {
+					val existingEdges = (for (nid <- uniqueNids; e <- gx.node(nid).from; if (e.value == label)) yield e).toList
+					if (label == Binding) {
+						existingEdges.foldLeft(gx) {
+							// Link to bound children
+							case (gx1, e) => gx1.edge(e.id).delete.unfocus.node(replacement.id).link(Binding, e.to.id).unfocus
+						}
+					} else {
+						// Create new child by unifying existing children
+						val childReplacement = unify(gx, for (e <- existingEdges) yield e.to.id)
+						// Link to new child
+						childReplacement.unfocus.node(replacement.id).link(label, childReplacement.id).unfocus
+					}
+				}
+			}
+			g4.node(replacement.id)
+		}
 	} 
 	
 	sealed trait StepResult
@@ -468,15 +546,8 @@ object Lang8 {
 			edges.foldLeft(g) { case (g, e) => copyEdge(g.edge(e), copies).unfocus }
 		}
 		val g2 = copyEdges(g1, copies)
-		val g3 = g2.node(bindingParentId).link(Binding, instantiation).unfocus		
-		val nf4 = g3.addNode(Intersection)
-		val g5 = nf4.unfocus.node(nf.id).delete
-		val g6 = g5.node(bindingParentId).link(Binding, nf4.id).unfocus
-		g6.node(nf4.id)
-			.link(Member, instantiationTargetId)
-			.from
-			.link(Member, instantiation)
-			.from
+		val g3 = g2.node(bindingParentId).link(Binding, instantiation).unfocus.node(nf.id).delete
+		unify(g3, List(instantiationTargetId, instantiation))
 	}
 	
 	def solveIntersection(g: Graph[NodeLabel,EdgeLabel], e1: EdgeId, e2: EdgeId): StepResult = {
@@ -734,7 +805,7 @@ object Lang8 {
 		else {
 			val instantiation = instantiations(0)
 			val instantiationResult = instantiate(instantiation)
-			Step(instantiationResult.unfocus, "Instantiated " + instantiation.id)
+			Step(instantiationResult.unfocus, "Instantiated " + instantiation.id + " to " + instantiationResult.id)
 		}
 	}
 	
