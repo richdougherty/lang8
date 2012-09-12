@@ -137,24 +137,42 @@ object GraphUtils {
 			addTree0(g, Nil, tree)
 		}
 
-	def newScope[N,E](g: Graph[N,E]): Scope[N,E] = new Scope(g, Map.empty)
+	def newScope[N,E](g: Graph[N,E]): Scope[N,E] = new Scope(g, Map.empty[String,NodeId]::Nil)
 	
-	class Scope[+N,+E](val g: Graph[N,E], val names: Map[String,NodeId]) {
+	class Scope[+N,+E](val g: Graph[N,E], val nameStack: List[Map[String,NodeId]]) {
 		def graph = g
+		def nest: Scope[N,E] = {
+			new Scope(g, Map.empty[String,NodeId]::nameStack)
+		}
+		def unnest: Scope[N,E] = {
+			new Scope(g, nameStack.tail)
+		}
+		private def names(name: String): NodeId = {
+			nameStack.foldLeft[Option[NodeId]](None) {
+				case (None, nameMap) => nameMap.get(name) match {
+					case None => None
+					case s => s
+				}
+				case (s, _) => s
+			}.get
+		}
 		def addNodeRef[N1>:N](name: String, nid: NodeId): Scope[N1,E] = {
-			assert(!names.contains(name))
+			//assert(!names.contains(name))
 			val nf = g.node(nid)
-			new Scope(nf.unfocus, names.updated(name, nf.id))
+			new Scope(nf.unfocus, nameStack.head.updated(name, nf.id)::nameStack.tail)
 		}
 		def addNode[N1>:N](name: String, value: N1): Scope[N1,E] = {
-			assert(!names.contains(name))
+			//assert(!names.contains(name))
 			val nf = g.addNode(value)
-			new Scope(nf.unfocus, names.updated(name, nf.id))
+			new Scope(nf.unfocus, nameStack.head.updated(name, nf.id)::nameStack.tail)
 		}
 		def addEdge[E1>:E](value: E1, from: String, to: String): Scope[N,E1] = {
 			val fromId = names(from)
 			val toId = names(to)
-			new Scope(g.node(fromId).link(value, toId).unfocus, names)
+			new Scope(g.node(fromId).link(value, toId).unfocus, nameStack)
+		}
+		def nodeRef(name: String): NodeId = {
+			names(name)
 		}
 		def node(name: String): NodeFocus[N,E] = {
 			g.node(names(name))
@@ -191,130 +209,6 @@ object Lang8 {
 	// For pair
 	case object Left extends EdgeLabel
 	case object Right extends EdgeLabel
-	
-	// Id
-	def createId(g: Graph[NodeLabel,EdgeLabel]): NodeFocus[NodeLabel,EdgeLabel] = {
-		newScope[NodeLabel,EdgeLabel](g)
-		.addNode("top", Lambda)
-		.addNode("a", Variable)
-		.addEdge(Domain, "top", "a")
-		.addEdge(Codomain, "top", "a")
-		.addEdge(Binding, "top", "a")
-		.node("top")
-	}
-	
-	// Swap
-	def createSwap(g: Graph[NodeLabel,EdgeLabel]): NodeFocus[NodeLabel,EdgeLabel] = {
-		newScope[NodeLabel,EdgeLabel](g)
-		.addNode("top", Lambda)
-		.addNode("inpair1", Pair)
-		.addNode("inpair2", Pair)
-		.addNode("outpair1", Pair)
-		.addNode("outpair2", Pair)
-		.addNode("a", Variable)
-		.addNode("b", Variable)
-		.addNode("rest", Variable)
-		.addEdge(Domain, "top", "inpair1")
-		.addEdge(Left, "inpair1", "b")
-		.addEdge(Right, "inpair1", "inpair2")
-		.addEdge(Left, "inpair2", "a")
-		.addEdge(Right, "inpair2", "rest")
-		.addEdge(Codomain, "top", "outpair1")
-		.addEdge(Left, "outpair1", "a")
-		.addEdge(Right, "outpair1", "outpair2")
-		.addEdge(Left, "outpair2", "b")
-		.addEdge(Right, "outpair2", "rest")
-		.addEdge(Binding, "top", "inpair1")
-		.addEdge(Binding, "top", "inpair2")
-		.addEdge(Binding, "top", "outpair1")
-		.addEdge(Binding, "top", "outpair2")
-		.addEdge(Binding, "top", "a")
-		.addEdge(Binding, "top", "b")
-		.addEdge(Binding, "top", "rest")
-		.node("top")
-	}
-	
-	// Apply
-	def createApply(g: Graph[NodeLabel,EdgeLabel]): NodeFocus[NodeLabel,EdgeLabel] = {
-		newScope[NodeLabel,EdgeLabel](g)
-		.addNode("top", Lambda)
-		.addNode("inpair", Pair)
-		.addNode("lam", Lambda)
-		.addNode("rest", Variable)
-		.addNode("out", Variable)
-		.addEdge(Domain, "top", "inpair")
-		.addEdge(Codomain, "top", "out")
-		.addEdge(Domain, "lam", "rest")
-		.addEdge(Codomain, "lam", "out")
-		.addEdge(Left, "inpair", "lam")
-		.addEdge(Right, "inpair", "rest")
-		.addEdge(Binding, "top", "inpair")
-		.addEdge(Binding, "top", "lam")
-		.addEdge(Binding, "top", "rest")
-		.addEdge(Binding, "top", "out")
-		.node("top")
-	}
-	
-	// Integer
-	def createIntegerLib(g: Graph[NodeLabel,EdgeLabel]): Graph[NodeLabel,EdgeLabel] = {
-		newScope[NodeLabel,EdgeLabel](g)
-		.addNode("zero", Symbol)
-		.addNode("succ", Symbol)
-		
-		.addNode("inc", Lambda)
-		.addNode("inpair1", Pair)
-		.addNode("outpair1", Pair)
-		.addNode("a", Variable)
-		.addNode("aSucc", Pair)
-		.addNode("rest", Variable)
-		.addEdge(Domain, "inc", "inpair1")
-		.addEdge(Left, "inpair1", "a")
-		.addEdge(Right, "inpair1", "rest")
-		.addEdge(Codomain, "inc", "outpair1")
-		.addEdge(Left, "outpair1", "aSucc")
-		.addEdge(Right, "outpair1", "rest")
-		.addEdge(Left, "aSucc", "succ")
-		.addEdge(Right, "aSucc", "a")
-		.addEdge(Binding, "inc", "inpair1")
-		.addEdge(Binding, "inc", "outpair1")
-		.addEdge(Binding, "inc", "a")
-		.addEdge(Binding, "inc", "aSucc")
-		.addEdge(Binding, "inc", "rest")
-		
-		.graph
-	}
-	
-	def createComposition(g: Graph[NodeLabel,EdgeLabel], lam1: NodeId, lam2: NodeId): NodeFocus[NodeLabel,EdgeLabel] = {
-		newScope[NodeLabel,EdgeLabel](g)
-		.addNodeRef("lam1", lam1)
-		.addNodeRef("lam2", lam2)
-		.addNode("top", Lambda)
-		.addNode("in", Variable)
-		.addNode("mid", Variable)
-		.addNode("out", Variable)
-		.addNode("lam1inst", Instantiation)
-		.addNode("lam1target", Lambda)
-		.addNode("lam2inst", Instantiation)
-		.addNode("lam2target", Lambda)
-		.addEdge(Codomain, "top", "in")
-		.addEdge(Domain, "top", "out")
-		.addEdge(Codomain, "lam1target", "in")
-		.addEdge(Domain, "lam1target", "mid")
-		.addEdge(Codomain, "lam2target", "mid")
-		.addEdge(Domain, "lam2target", "out")
-		.addEdge(Template, "lam1inst", "lam1")
-		.addEdge(Target, "lam1inst", "lam1target")
-		.addEdge(Template, "lam2inst", "lam2")
-		.addEdge(Target, "lam2inst", "lam2target")
-		.addEdge(Binding, "top", "in")
-		.addEdge(Binding, "top", "mid")
-		.addEdge(Binding, "top", "out")
-		.addEdge(Binding, "top", "lam1inst")
-		.addEdge(Binding, "top", "lam2inst")
-		.addEdge(Binding, "top", "lam1target")
-		.addEdge(Binding, "top", "lam2target")
-		.node("top")
-	}
 	
 	import java.io._
 	
@@ -618,25 +512,141 @@ object Lang8 {
 	}
 	
 	def main(args: Array[String]): Unit = {
-		val idFocus = createId(Graph.empty)
-		val swapFocus = createSwap(idFocus.unfocus)
-		val swapSwapFocus = createComposition(swapFocus.unfocus, swapFocus.id, swapFocus.id)
-		val idIdFocus = createComposition(swapSwapFocus.unfocus, idFocus.id, idFocus.id)
-		//val integerLib = createIntegerLib(swapSwapFocus.unfocus)
-		val applyFocus = createApply(idIdFocus.unfocus)
-		val start = applyFocus.unfocus
-			.addNode(Root)
-			.link(Pin, swapFocus.id)
-			.from
-			.link(Pin, idFocus.id)
-			.from
-			.link(Pin, swapSwapFocus.id)
-			.from
-			.link(Pin, idIdFocus.id)
-			.from
-			.link(Pin, applyFocus.id)
-			.unfocus
+	
+	def compose(s: Scope[NodeLabel,EdgeLabel], name: String, components: String): Scope[NodeLabel,EdgeLabel] = {
+		s
+		.addNode(name, Lambda)
+	}
+
+	def createComposition(s: Scope[NodeLabel,EdgeLabel], name: String, lam1: String, lam2: String): Scope[NodeLabel,EdgeLabel] = {
+		newScope[NodeLabel,EdgeLabel](g)
+		.addNode("top", Lambda)
+		.addNode("in", Variable)
+		.addNode("mid", Variable)
+		.addNode("out", Variable)
+		.addNode("lam1inst", Instantiation)
+		.addNode("lam1target", Lambda)
+		.addNode("lam2inst", Instantiation)
+		.addNode("lam2target", Lambda)
+		.addEdge(Codomain, "top", "in")
+		.addEdge(Domain, "top", "out")
+		.addEdge(Codomain, "lam1target", "in")
+		.addEdge(Domain, "lam1target", "mid")
+		.addEdge(Codomain, "lam2target", "mid")
+		.addEdge(Domain, "lam2target", "out")
+		.addEdge(Template, "lam1inst", lam1)
+		.addEdge(Target, "lam1inst", "lam1target")
+		.addEdge(Template, "lam2inst", lam2)
+		.addEdge(Target, "lam2inst", "lam2target")
+		.addEdge(Binding, "top", "in")
+		.addEdge(Binding, "top", "mid")
+		.addEdge(Binding, "top", "out")
+		.addEdge(Binding, "top", "lam1inst")
+		.addEdge(Binding, "top", "lam2inst")
+		.addEdge(Binding, "top", "lam1target")
+		.addEdge(Binding, "top", "lam2target")
+		.node("top")
+	}
+
+	
+		val start = newScope[NodeLabel,EdgeLabel](Graph.empty)
+		.addNode("root", Root)
 		
+		// Id
+		.addNode("id", Lambda)
+		.addEdge(Pin, "root", "id")
+		.nest
+		.addNode("a", Variable)
+		.addEdge(Domain, "id", "a")
+		.addEdge(Codomain, "id", "a")
+		.addEdge(Binding, "id", "a")
+		.unnest
+
+		// Swap
+		.addNode("swap", Lambda)
+		.addEdge(Pin, "root", "swap")
+		.nest
+		.addNode("inpair1", Pair)
+		.addNode("inpair2", Pair)
+		.addNode("outpair1", Pair)
+		.addNode("outpair2", Pair)
+		.addNode("a", Variable)
+		.addNode("b", Variable)
+		.addNode("rest", Variable)
+		.addEdge(Domain, "swap", "inpair1")
+		.addEdge(Left, "inpair1", "b")
+		.addEdge(Right, "inpair1", "inpair2")
+		.addEdge(Left, "inpair2", "a")
+		.addEdge(Right, "inpair2", "rest")
+		.addEdge(Codomain, "swap", "outpair1")
+		.addEdge(Left, "outpair1", "a")
+		.addEdge(Right, "outpair1", "outpair2")
+		.addEdge(Left, "outpair2", "b")
+		.addEdge(Right, "outpair2", "rest")
+		.addEdge(Binding, "swap", "inpair1")
+		.addEdge(Binding, "swap", "inpair2")
+		.addEdge(Binding, "swap", "outpair1")
+		.addEdge(Binding, "swap", "outpair2")
+		.addEdge(Binding, "swap", "a")
+		.addEdge(Binding, "swap", "b")
+		.addEdge(Binding, "swap", "rest")
+		.unnest
+		
+		// Apply
+		.addNode("apply", Lambda)
+		.addEdge(Pin, "root", "apply")
+		.nest
+		.addNode("inpair", Pair)
+		.addNode("lam", Lambda)
+		.addNode("rest", Variable)
+		.addNode("out", Variable)
+		.addEdge(Domain, "apply", "inpair")
+		.addEdge(Codomain, "apply", "out")
+		.addEdge(Domain, "lam", "rest")
+		.addEdge(Codomain, "lam", "out")
+		.addEdge(Left, "inpair", "lam")
+		.addEdge(Right, "inpair", "rest")
+		.addEdge(Binding, "apply", "inpair")
+		.addEdge(Binding, "apply", "lam")
+		.addEdge(Binding, "apply", "rest")
+		.addEdge(Binding, "apply", "out")
+		.unnest
+		
+		// Zero
+		.addNode("zero", Symbol)
+		.addEdge(Pin, "root", "zero")
+		.nest
+		
+		// Succ
+		.addNode("succ", Symbol)
+		.addEdge(Pin, "root", "succ")
+		.nest
+		
+		// Inc
+		.addNode("inc", Lambda)
+		.addEdge(Pin, "root", "inc")
+		.nest
+		.addNode("inpair1", Pair)
+		.addNode("outpair1", Pair)
+		.addNode("a", Variable)
+		.addNode("aSucc", Pair)
+		.addNode("rest", Variable)
+		.addEdge(Domain, "inc", "inpair1")
+		.addEdge(Left, "inpair1", "a")
+		.addEdge(Right, "inpair1", "rest")
+		.addEdge(Codomain, "inc", "outpair1")
+		.addEdge(Left, "outpair1", "aSucc")
+		.addEdge(Right, "outpair1", "rest")
+		.addEdge(Left, "aSucc", "succ")
+		.addEdge(Right, "aSucc", "a")
+		.addEdge(Binding, "inc", "inpair1")
+		.addEdge(Binding, "inc", "outpair1")
+		.addEdge(Binding, "inc", "a")
+		.addEdge(Binding, "inc", "aSucc")
+		.addEdge(Binding, "inc", "rest")
+		
+		.graph
+	
 		val stepFunctions: List[Graph[NodeLabel,EdgeLabel]=>StepResult] = List(
 			markSweep _,
 			merge1 _,
